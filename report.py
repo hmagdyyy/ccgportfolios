@@ -7,45 +7,44 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 
 def build_unified_table(totals_df: pd.DataFrame, matrix_df: pd.DataFrame):
-    """
-    Unified table layout:
-      - TOTALS section (rows) before holdings:
-          Row: Total NAV (portfolios as columns)
-          Row: Total Cash/PP (portfolios as columns)
-      - HOLDINGS section:
-          Columns: Ticker, <portfolios...>, Presence (presence is last)
-    """
     if matrix_df is None:
         matrix_df = pd.DataFrame()
 
     portfolio_cols = [c for c in matrix_df.columns if c not in ("ticker","presence","presence_count")]
     if not portfolio_cols and totals_df is not None and not totals_df.empty:
-        portfolio_cols = sorted(totals_df["portfolio"].dropna().unique().tolist())
+        portfolio_cols = totals_df["portfolio"].dropna().astype(str).unique().tolist()
 
-    nav_map = {}
-    cash_map = {}
+    nav_map, cash_map, pp_map = {}, {}, {}
     if totals_df is not None and not totals_df.empty:
         agg = totals_df.groupby("portfolio", as_index=False).agg(
             total_nav=("total_nav","sum"),
-            total_cash_or_pp=("total_cash_or_pp","sum")
+            total_cash=("total_cash","sum"),
+            total_purchasing_power=("total_purchasing_power","sum"),
         )
         for _, r in agg.iterrows():
-            nav_map[str(r["portfolio"])] = r["total_nav"]
-            cash_map[str(r["portfolio"])] = r["total_cash_or_pp"]
+            p = str(r["portfolio"])
+            nav_map[p] = r.get("total_nav", np.nan)
+            cash_map[p] = r.get("total_cash", np.nan)
+            pp_map[p] = r.get("total_purchasing_power", np.nan)
 
     def fmt(x):
         return f"{x:,.2f}" if pd.notna(x) else ""
 
-    data = []
-    data.append(["TOTALS"] + [""] * (len(portfolio_cols)))
+    def fmt_pct(cash, nav):
+        if pd.isna(cash) or pd.isna(nav) or nav == 0:
+            return ""
+        return f"{(cash/nav)*100.0:.2f}%"
+
+    data=[]
+    data.append(["TOTALS"] + [""]*len(portfolio_cols))
     data.append(["Metric"] + portfolio_cols)
     data.append(["Total NAV"] + [fmt(nav_map.get(p, np.nan)) for p in portfolio_cols])
-    data.append(["Total Cash/PP"] + [fmt(cash_map.get(p, np.nan)) for p in portfolio_cols])
+    data.append(["Total Cash"] + [fmt(cash_map.get(p, np.nan)) for p in portfolio_cols])
+    data.append(["Purchasing Power"] + [fmt(pp_map.get(p, np.nan)) for p in portfolio_cols])
+    data.append(["%Cash"] + [fmt_pct(cash_map.get(p, np.nan), nav_map.get(p, np.nan)) for p in portfolio_cols])
 
-    # spacer
-    data.append([""] + [""] * (len(portfolio_cols)))
+    data.append([""] + [""]*len(portfolio_cols))
 
-    # Holdings
     m = matrix_df.copy()
     for c in portfolio_cols:
         if c in m.columns:
@@ -55,7 +54,7 @@ def build_unified_table(totals_df: pd.DataFrame, matrix_df: pd.DataFrame):
     if "presence" not in m.columns:
         m["presence"] = ""
 
-    data.append(["HOLDINGS"] + [""] * (len(portfolio_cols)))
+    data.append(["HOLDINGS"] + [""]*len(portfolio_cols))
     data.append(["Ticker"] + portfolio_cols + ["Presence"])
 
     if not m.empty:
@@ -63,18 +62,10 @@ def build_unified_table(totals_df: pd.DataFrame, matrix_df: pd.DataFrame):
         data.extend(rows)
 
     max_cols = max(len(r) for r in data) if data else 1
-    data = [list(r) + [""]*(max_cols-len(r)) for r in data]
+    data = [list(r)+[""]*(max_cols-len(r)) for r in data]
     return data
 
-def export_excel(out_path: str, *args):
-    if len(args)==1:
-        unified=args[0]
-        with pd.ExcelWriter(out_path, engine="openpyxl") as w:
-            (unified if isinstance(unified, pd.DataFrame) else pd.DataFrame(unified)).to_excel(w, index=False, header=False, sheet_name="Consolidated")
-        return
-    if len(args)!=4:
-        raise TypeError("export_excel expected either (out_path, unified_df) or (out_path, summary_df, holdings_df, totals_df, matrix_df)")
-    summary_df, holdings_df, totals_df, matrix_df = args
+def export_excel(out_path: str, summary_df: pd.DataFrame, holdings_df: pd.DataFrame, totals_df: pd.DataFrame, matrix_df: pd.DataFrame):
     unified_df = pd.DataFrame(build_unified_table(totals_df, matrix_df))
     with pd.ExcelWriter(out_path, engine="openpyxl") as w:
         unified_df.to_excel(w, index=False, header=False, sheet_name="Consolidated")
@@ -83,23 +74,15 @@ def export_excel(out_path: str, *args):
         holdings_df.to_excel(w, index=False, sheet_name="Holdings")
         matrix_df.to_excel(w, index=False, sheet_name="PresenceMatrix")
 
-def export_pdf(out_path: str, *args, title: str = "Master Allocation Comparison"):
+def export_pdf(out_path: str, totals_df: pd.DataFrame, matrix_df: pd.DataFrame, title: str = "Master Allocation Comparison"):
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(out_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
     elems = [Paragraph(title, styles["Title"]), Spacer(1,8)]
-    if len(args)==1:
-        unified=args[0]
-        data = unified.values.tolist() if isinstance(unified, pd.DataFrame) else list(unified)
-    elif len(args)==2:
-        totals_df, matrix_df = args
-        data = build_unified_table(totals_df, matrix_df)
-    else:
-        raise TypeError("export_pdf expected either (out_path, unified_df, title=...) or (out_path, totals_df, matrix_df, title=...)")
+    data = build_unified_table(totals_df, matrix_df)
 
     max_cols = max(len(r) for r in data) if data else 1
     data = [list(r)+[""]*(max_cols-len(r)) for r in data]
 
-    # find section header rows
     holdings_row=None
     for i,r in enumerate(data):
         if str(r[0]).strip().upper()=="HOLDINGS":
