@@ -42,6 +42,7 @@ def build_presence_matrix(holdings_df: pd.DataFrame, portfolios: list[str]) -> p
 
 def build_master(
     new_portfolios_path: str | None = None,
+    fx_usd_to_egp: float | None = None,
     yasser_path: str | None = None,
     cfh_path: str | None = None,
     positions_by_group_path: str | None = None,
@@ -50,7 +51,7 @@ def build_master(
     parts=[]
 
     if new_portfolios_path:
-        parts.append(extract_new_portfolios(new_portfolios_path, "New Portfolios"))
+        parts.append(extract_new_portfolios(new_portfolios_path, "Arqaam", fx_usd_to_egp=fx_usd_to_egp))
     if yasser_path:
         parts.append(extract_yasser(yasser_path))
     if cfh_path:

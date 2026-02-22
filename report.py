@@ -30,20 +30,45 @@ def build_unified_table(totals_df: pd.DataFrame, matrix_df: pd.DataFrame):
     def fmt(x):
         return f"{x:,.2f}" if pd.notna(x) else ""
 
-    def fmt_pct(cash, nav):
-        if pd.isna(cash) or pd.isna(nav) or nav == 0:
-            return ""
-        return f"{(cash/nav)*100.0:.2f}%"
+    def pct_for_portfolio(p: str):
+        nav = nav_map.get(p, np.nan)
+        cash = cash_map.get(p, np.nan)
+        pp = pp_map.get(p, np.nan)
+
+        # if cash exists => Cash/NAV
+        if pd.notna(cash) and pd.notna(nav) and nav != 0:
+            return (cash / nav) * 100.0
+
+        # if PP exists instead => PP/(NAV+PP)
+        if pd.notna(pp) and pd.notna(nav) and (nav + pp) != 0:
+            return (pp / (nav + pp)) * 100.0
+
+        return np.nan
+
+    def fmt_pct(v):
+        return f"{v:.2f}%" if pd.notna(v) else ""
+
+    total_nav = np.nansum([nav_map.get(p, np.nan) for p in portfolio_cols]) if portfolio_cols else np.nan
+    total_cash = np.nansum([cash_map.get(p, np.nan) for p in portfolio_cols]) if portfolio_cols else np.nan
+    total_pp = np.nansum([pp_map.get(p, np.nan) for p in portfolio_cols]) if portfolio_cols else np.nan
+
+    total_pct = np.nan
+    if pd.notna(total_cash) and pd.notna(total_nav) and total_nav != 0:
+        total_pct = (total_cash / total_nav) * 100.0
+    elif pd.notna(total_pp) and pd.notna(total_nav) and (total_nav + total_pp) != 0:
+        total_pct = (total_pp / (total_nav + total_pp)) * 100.0
+
+    cols_with_total = portfolio_cols + ["TOTAL"]
 
     data=[]
-    data.append(["TOTALS"] + [""]*len(portfolio_cols))
-    data.append(["Metric"] + portfolio_cols)
-    data.append(["Total NAV"] + [fmt(nav_map.get(p, np.nan)) for p in portfolio_cols])
-    data.append(["Total Cash"] + [fmt(cash_map.get(p, np.nan)) for p in portfolio_cols])
-    data.append(["Purchasing Power"] + [fmt(pp_map.get(p, np.nan)) for p in portfolio_cols])
-    data.append(["%Cash"] + [fmt_pct(cash_map.get(p, np.nan), nav_map.get(p, np.nan)) for p in portfolio_cols])
+    data.append(["TOTALS"] + [""]*len(cols_with_total))
+    data.append(["Metric"] + cols_with_total)
+    data.append(["Total NAV"] + [fmt(nav_map.get(p, np.nan)) for p in portfolio_cols] + [fmt(total_nav)])
+    data.append(["Total Cash"] + [fmt(cash_map.get(p, np.nan)) for p in portfolio_cols] + [fmt(total_cash)])
+    data.append(["Purchasing Power"] + [fmt(pp_map.get(p, np.nan)) for p in portfolio_cols] + [fmt(total_pp)])
+    data.append(["%Cash"] + [fmt_pct(pct_for_portfolio(p)) for p in portfolio_cols] + [fmt_pct(total_pct)])
 
-    data.append([""] + [""]*len(portfolio_cols))
+    data.append([""] + [""]*len(cols_with_total))
 
     m = matrix_df.copy()
     for c in portfolio_cols:
@@ -54,11 +79,12 @@ def build_unified_table(totals_df: pd.DataFrame, matrix_df: pd.DataFrame):
     if "presence" not in m.columns:
         m["presence"] = ""
 
-    data.append(["HOLDINGS"] + [""]*len(portfolio_cols))
-    data.append(["Ticker"] + portfolio_cols + ["Presence"])
+    data.append(["HOLDINGS"] + [""]*len(cols_with_total))
+    data.append(["Ticker"] + portfolio_cols + ["Presence"] + [""])
 
     if not m.empty:
         rows = m[["ticker"] + portfolio_cols + ["presence"]].values.tolist()
+        rows = [r + [""] for r in rows]
         data.extend(rows)
 
     max_cols = max(len(r) for r in data) if data else 1

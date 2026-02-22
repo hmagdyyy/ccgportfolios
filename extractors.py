@@ -19,7 +19,7 @@ def _value_to_right(df: pd.DataFrame, r: int, c: int, max_steps: int = 10):
 # -----------------------------
 # New Portfolios (single group)
 # -----------------------------
-def extract_new_portfolios(path: str, group_name: str = "New Portfolios"):
+def extract_new_portfolios(path: str, group_name: str = "Arqaam", fx_usd_to_egp: float | None = None):
     """
     Rules:
       - Cash from B2
@@ -31,8 +31,15 @@ def extract_new_portfolios(path: str, group_name: str = "New Portfolios"):
 
     df = pd.read_excel(path, sheet_name=sheet, header=None, dtype=object).replace({np.nan: None})
 
-    cash = coerce_number(df.iat[1, 1])  # B2
-    nav  = coerce_number(df.iat[4, 1])  # B5
+    cash = coerce_number(df.iat[1, 1])  # B2 (USD)
+    nav  = coerce_number(df.iat[4, 1])  # B5 (USD)
+
+    # Convert USD->EGP if rate provided
+    if fx_usd_to_egp is not None and fx_usd_to_egp == fx_usd_to_egp:
+        if cash == cash:
+            cash = cash * float(fx_usd_to_egp)
+        if nav == nav:
+            nav = nav * float(fx_usd_to_egp)
 
     # Find holdings header row
     header_row = None
